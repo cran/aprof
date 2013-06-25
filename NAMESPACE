@@ -1,0 +1,8 @@
+S3method(plot,aprof)
+S3method(print,aprof)
+S3method(summary,aprof)
+export(aprof)
+export(is.aprof)
+export(profileplot)
+export(readLineDensity)
+export(targetedSummary)
