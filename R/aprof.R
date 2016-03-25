@@ -138,9 +138,10 @@ Mem <- grepl("memory profiling",RprofSamples[1])
 
 if(Mem){
   tosplit <- grepl("#", RprofSamples[-1])
-  splPos<-regexpr(pattern = ":[[:digit:]]:", text =RprofSamples[-1][tosplit])
-  meminfo <- !splPos==-1
-  mem <- substr(RprofSamples[-1][tosplit][meminfo],1,splPos[meminfo])
+  splPos<-regexpr(pattern = "^:[0-9]+:[0-9]+:[0-9]+:[0-9]+:",text =RprofSamples[-1][tosplit])
+  meminfo <- !splPos==(-1)
+  cutlength <- attr(splPos,"match.length")
+  mem <- substr(RprofSamples[-1][tosplit][meminfo],1,cutlength[meminfo])
   mem <- t(sapply(strsplit(mem,":"),function(X) as.numeric(X[-1])))
   mem <- as.data.frame(mem)
   colnames(mem) <- c("sm_v_heap","lrg_v_heap","mem_in_node")
@@ -150,7 +151,7 @@ if(Mem){
   regular <- substring(RprofSamples[-1][tosplit],splPosReg)
   regular <- gsub(":","",regular)
   RprofSamples <- c(RprofSamples[1],regular)
-  mem$calllines <- 2:length(regular)
+  mem$calllines <- which(meminfo)
 }
 
 splitCalls<- sapply(RprofSamples[-1],
@@ -251,9 +252,18 @@ readLineDensity<-function(aprofobject=NULL,Memprof=FALSE){
   cleancalls<-sapply(calls[!idfiles],
     function(x) gsub("#File", NA, x))
     
-    LineCalls<- unlist(sapply(cleancalls, function(X)
-                       X[grep(paste(FileNumber,"#",sep=''),X)],
-                       USE.NAMES=FALSE))
+    LineCalls<- lapply(cleancalls, function(X)
+                       unique(X[grep(paste(FileNumber,"#",sep=''),X)],
+                              USE.NAMES=FALSE))
+    
+    ## in case of multiple line calls;
+    if(any(sapply(LineCalls,length)>1)){
+        LineCalls <- sapply(LineCalls,function(X) X[1])
+        warning("Some line calls stripped - BUGCODE: 02022016")
+         } 
+
+    LineCalls <- unlist(LineCalls)
+    
     
     Pathways<-unique(sapply(LineCalls, paste,collapse="-"))
 
@@ -351,7 +361,7 @@ if(!is.null(aprofobject$calls)){
 
       
         if(!is.null(aprofobject$mem)){
-          cat("\n Memory statistics time per line number:\n\n")
+          cat("\n Memory statistics per line number:\n\n")
           memtable <- readLineDensity(aprofobject,Memprof=TRUE)$Total.Mem
           prettymem <- cbind(Line=names(memtable),
                              MB=round(as.double(memtable),3))
@@ -516,8 +526,7 @@ PlotSourceCode<-function(SourceFilename){
 #' @param x An aprof object as returned by aprof().
 #' If this object contains both memory and time profiling information
 #' both will be plotted (as proportions of total time and
-#' total memory allocations [Note: memory profiling ignored until the next
-#' release].
+#' total memory allocations.
 #' @param y Unused and ignored at current.
 #' @param \dots Additional printing arguments. Unused at current.
 #' 
@@ -692,9 +701,6 @@ profileplot <- function(aprofobject){
 
   SourceFilename <- aprofobject$sourcefile
 
-  if(!is.null(aprofobject$memcalls)){
-    if(is.null(aprofobject$calls)){stop("profileplot does not work on memory profiles")}}
-
   if(is.null(SourceFilename)){
     stop("aprof object requires a defined source code file for plotting")
   }
@@ -832,16 +838,6 @@ summary.aprof<-function(object,...){
 
   aprofobject<-object
 
-  if(!is.null(aprofobject$memcalls)){
-    if(is.null(aprofobject$calls)){
-      stop("Projected time gains cannot be summerized for memory profiling")
-    }}
-  
-  if(!is.null(aprofobject$calls)){
-    if(!is.null(aprofobject$memcalls)){
-      warning("memory profile not used in summary.aprof")}
-    
-    
     LineProf<-readLineDensity(aprofobject)
     PropLines<-LineProf$Time.Density/LineProf$Total.Time
 
@@ -882,8 +878,7 @@ summary.aprof<-function(object,...){
     cat("\n ** Asymtotic max. improvement at current scaling\n\n")
     
     invisible(SpeedTable)
-  }
-  
+ 
 }
 
 
@@ -902,30 +897,19 @@ summary.aprof<-function(object,...){
 #' "lm.fit" or "mean" a parent call of "mean.default".
 #' Note that currently, the option only returns the most frequently
 #' associated parent call when multiple unique parents exist.
-#' @param mem Logical, should statistics be adapted to a memory
-#' profile? This is only possible if the output from Rprofmem
-#' was included in the aprof-object [Note: unavailable for this
-#' release].
 #' @author Marco D. Visser
 #' 
 #' @export
-targetedSummary<-function(target=NULL,aprofobject=NULL,findParent=FALSE,
-                          mem=FALSE){
+targetedSummary<-function(target=NULL,aprofobject=NULL,findParent=FALSE){
 
   if(is.null(target)){stop("Function requires target line number")}
 
-  if(mem) {
-    if(is.null(aprofobject$memcalls)){
-      stop("mem==TRUE yet no memory profiling detected")
-    }
-    calls <- aprofobject$memcalls
-    interval <- aprofobject$meminterval
-  } else {
     if(is.null(aprofobject$calls)){
-      stop("calls apear empty (and mem is set to FALSE)")}
+      stop("Calls appear empty - no call stack samples. Did the program run too fast? ")     }
+
     calls <- aprofobject$calls
     interval <- aprofobject$interval
-  }
+  
   
   if(is.null(aprofobject$sourcefile)) {
     TargetFile<-"1#"
